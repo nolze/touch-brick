@@ -1,0 +1,397 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+    <title>(つ >ω●)つ</title>
+    <style type="text/css">
+      body {
+        -webkit-text-size-adjust: 100%;
+      }
+      html, body {
+        background: #fff;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #canvas {
+        height: 600px;
+        width: 880px;
+        border: 1px solid #000;
+        margin: 0 auto;
+        margin-top: 30px;
+      }
+      #link {
+        width: 880px;
+        margin: 0 auto;
+        font-size: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+    <div id="canvas"></div>
+    <div id="link"><a href="http://www-ui.is.s.u-tokyo.ac.jp/~takeo/course/2015/ui/assignment.htm">http://www-ui.is.s.u-tokyo.ac.jp/~takeo/course/2015/ui/assignment.htm</a></div>
+    </main>
+    <script src="js/lodash.min.js"></script>
+    <script src="js/jquery.min.js"></script>
+    <script src="js/buzz.min.js"></script>
+    <script src="js/raphael-min.js"></script>
+    <script>
+    // prepare
+    document.body.addEventListener('touchmove', function(event) {
+      event.preventDefault();
+    }, false);
+
+    // main
+    var vSize = 48, gridSize = 40;
+    var paper = Raphael('canvas', '100%', '100%');
+    var horizontalN = 22, verticalN = 13;
+    var WIDTH = gridSize * horizontalN, HEIGHT = vSize * verticalN - 24;
+    paper.setViewBox(0.5, 0.5, WIDTH, HEIGHT);
+
+    var map = new Array(verticalN);
+    for(var i = 0; i < verticalN; ++i) map[i] = new Array(horizontalN);
+
+    var touches;
+    var blocks = {};
+    var blockNum = 1;
+    var defaultSeriesN = {2: 6, 3: 6, 4: 4, 6: 4}, seriesN = {2: 6, 3: 6, 4: 4, 6: 4};
+    var curSeries = [];
+    // licenced under public domain
+    var connectSound = new buzz.sound("audio/connect.mp3");
+    var cancelSound = new buzz.sound("audio/error.mp3");
+    var clickSound = new buzz.sound("audio/click.mp3");
+    var dropSound = new buzz.sound("audio/drop.mp3");
+
+    // draw grid
+    for (var i = 0; i < (WIDTH / gridSize); ++i) {
+      var c = paper.path(Raphael.format("M{0} 0L{1} {2}", i*gridSize, i*gridSize, HEIGHT));
+      c.attr("stroke", "#ccc");
+    }
+    for (var i = 0; i < (HEIGHT / vSize); ++i) {
+      var c = paper.path(Raphael.format("M0 {0}L{1} {2}", i*vSize, WIDTH, i*vSize));
+      c.attr("stroke", "#ccc");
+    }
+
+    // ground
+    var ground = paper.set();
+    var block = paper.rect(0, HEIGHT-24, gridSize*horizontalN, vSize);
+    block.attr("fill", "#138F44");
+    ground.push(block);
+    for(var i=0;i<horizontalN;++i){
+      var button = paper.rect(0+gridSize*i+8, HEIGHT-24-8, gridSize-16, 8);
+      button.attr("fill", "0-#138F44-#008242");
+      ground.push(button);
+    }
+    ground.blockId = blockNum;
+    blocks[ground.blockId] = ground;
+    ground.children = [];
+    for(var i = 0; i < horizontalN; ++i){
+      map[verticalN-1][i] = blockNum;
+    };
+
+    // utils
+    var snapX = function(x) { return Raphael.snapTo(gridSize, x, gridSize); };
+    var snapY = function(x) { return Raphael.snapTo(vSize, x, vSize); };
+    var limitWidth = function(x) {
+      if(gridSize*4.5 <= x && x <= gridSize*5.5) x = gridSize*6;
+      return Math.min(Math.max(x, gridSize*2), gridSize*6);
+    };
+    var calcBlockX = function(x0, x1, w) { return snapX((x0+x1)/2.0 - w/2.0 - gridSize); };
+    var calcBlockY = function(y0, y1) { return snapY((y0+y1) / 2.0 - vSize); };
+    var calcPosH = function(b) { return b.attr('x') / gridSize; };
+    var calcPosV = function(b) {  return b.attr('y') / vSize; };
+    var calcWidthN = function(b) {  return b.attr('width') / gridSize; };
+    var genBlock = function(x, y, widthN) {
+      var st = paper.set();
+      var block = paper.rect(x, y, gridSize*widthN, vSize);
+      block.attr("fill", "#E40000");
+      st.push(block);
+      for(var i=0;i<widthN;++i){
+        var button = paper.rect(x+gridSize*i+8, y+-8, gridSize-16, 8);
+        button.attr("fill", "0-#E40000-#9A001D");
+        st.push(button);
+      }
+      st.children = [];
+      return st;
+    };
+    var checkPlace = function(body) {
+      var canPlace = false, dup = false;
+      var posH = calcPosH(body), posV = calcPosV(body), widthN = calcWidthN(body);
+      for(var i = posH; i < posH+widthN; ++i){
+        if(map[posV][i]) dup = true;
+      }
+      if(!dup){
+        for(var i=posV+1; i >= posV-1; i-=2){
+          for(var j=posH; j<posH+widthN; ++j){
+            if(map[i][j]){
+              canPlace = map[i][j];
+              break;
+            }
+          }
+        }
+      }
+      return canPlace;
+    };
+
+    var doPlace = function(block) {
+      var canPlace = checkPlace(block[0]), dup = false;
+      var posH = calcPosH(block[0]), posV = calcPosV(block[0]), widthN = calcWidthN(block[0]);
+      if(block.parentId){
+        var parentBlock = blocks[block.parentId];
+        parentBlock.children = _.reject(parentBlock.children, function(id){ return blocks[id].blockId == block.blockId; });
+        if(block.parentId)seriesN[widthN]++;
+      }
+      if(canPlace && seriesN[widthN] > 0){
+        for(var i=1;i<block.length;++i){
+          block[i].toBack();
+        }
+        var parentBlock = _.find(blocks, function(b){ return b.blockId == canPlace; });
+        block.blockId = ++blockNum;
+        block.parentId = parentBlock.blockId;
+        parentBlock.children.push(block.blockId);
+        block.drag(move, start, up, block, block, block);
+        blocks[block.blockId] = block;
+        seriesN[widthN]--;
+        for(var i = posH; i < posH+widthN; ++i){
+          map[posV][i] = block.blockId;
+        }
+        connectSound.play();
+        return true;
+      }
+      else{
+        block.remove();
+        return false;
+      }
+    };
+    var moveBlock = function(block) {
+      var newX = block[0].matrix.x(block[0].attr('x'), block[0].attr('y'));
+      var newY = block[0].matrix.y(block[0].attr('x'), block[0].attr('y'));
+      var w = block[0].attr('width');
+      var widthN = w / gridSize;
+      var blockId = block.blockId, parentId = block.parentId;
+      block.remove();
+      var nextBlock = genBlock(newX, newY, widthN);
+      nextBlock.blockId = blockId;
+      nextBlock.parentId = parentId;
+      return doPlace(nextBlock);
+    };
+
+    var dfs = function(b, func) {
+      _.forEach(b.children, function(id){
+        func(blocks[id]);
+        dfs(blocks[id], func);
+      });
+    };
+
+    var invalid = false;
+    var start = function(x, y, ev) {
+      //if(isNewBlock)return;
+      var posH = calcPosH(this[0]), posV = calcPosV(this[0]), widthN = calcWidthN(this[0]);
+      for(var i = posH; i < posH+widthN; ++i){
+        map[posV][i] = false;
+      }
+      var blockId = this.blockId, children = this.children;
+      dfs(this, function(b) {
+        var posH = calcPosH(b[0]), posV = calcPosV(b[0]);
+        var widthN = b[0].attr('width') / gridSize;
+        for(var i = posH; i < posH+widthN; ++i){
+          map[posV][i] = false;
+        }
+      });
+    };
+    var move = function (dx, dy) {
+      if(isNewBlock)return;
+      this.transform(Raphael.format("t{0},{1}", snapX(dx), snapY(dy)));
+      var widthN = calcWidthN(this[0]);
+      var posX = this[0].matrix.x(this[0].attr('x'), this[0].attr('y'));
+      var posY = this[0].matrix.y(this[0].attr('x'), this[0].attr('y'));
+      var posH = posX/gridSize, posV = posY/vSize;
+      var flag = _.some(_.slice(map[posV], posH, posH+widthN), Number);
+      var blockId = this.blockId, children = this.children;
+      dfs(this, function(b) {
+        if(b.blockId === blockId) return;
+        b.transform(Raphael.format("t{0},{1}", snapX(dx), snapY(dy)));
+        var widthN = calcWidthN(b[0]);
+        if(!flag){
+          var posX = b[0].matrix.x(b[0].attr('x'), b[0].attr('y'));
+          var posY = b[0].matrix.y(b[0].attr('x'), b[0].attr('y'));
+          var posH = posX/gridSize, posV = posY/vSize;
+          flag = _.some(_.slice(map[posV], posH, posH+widthN), Number);
+        }
+      });
+      if(flag){
+        this.attr({fill:'#E40000', opacity: 0.2});
+        dfs(this, function(b) {
+          b.attr({fill:'#E40000', opacity: 0.2});
+        });
+        invalid = true;
+      }
+      else{
+        this.attr({fill:'#E40000', opacity: 1});
+        dfs(this, function(b) {
+          b.attr({fill:'#E40000', opacity: 1});
+        });
+        invalid = false;
+      }
+    };
+
+    var up = function() {
+      if(isNewBlock)return;
+      if(invalid){
+        this.transform(Raphael.format("t0,0"));
+        dfs(this, function(b) {
+          if(b.blockId === blockId) return;
+          b.transform(Raphael.format("t0,0"));
+        });
+      }
+      var blockId = this.blockId, children = this.children;
+      var ret = moveBlock(this);
+      dfs(this, function(b) {
+        moveBlock(b);
+      });
+      if(!invalid && !ret){
+        dropSound.play();
+      }
+      invalid = false;
+    };
+
+    var genBar = function(x, y, widthN) {
+      var st = paper.set();
+      var block = paper.rect(x, y, widthN*gridSize, 40);
+      block.attr("fill", "#E40000");
+      st.push(block);
+      var r =  (gridSize-16)/2;
+      for(var i=0;i<widthN;++i){
+        var button = paper.ellipse(x+gridSize*i+r+8, y+(40/2), r, r);
+        button.attr("fill", "#EF0000");
+        st.push(button);
+      }
+      return st;
+    };
+    var drawSeries = function(block) {
+      for(var i=0;i<curSeries.length;++i){
+        curSeries[i].remove();
+      }
+      var posX = block[0].attr("x"), posY = block[0].attr("y");
+      var widthN = block[0].attr('width') / gridSize;
+      var n = Math.max(seriesN[widthN]-1, 0), dn = defaultSeriesN[widthN];
+      for(var i=0;i<n;++i){
+        var b = genBar(WIDTH-block[0].attr('width')-20, 20+i*(vSize+10), widthN);
+        curSeries.push(b);
+      }
+      for(var i=n;i < dn;++i){
+        var b = genBar(WIDTH-block[0].attr('width')-20, 20+i*(vSize+10), widthN);
+        b.attr({fill: '#ffffff'});
+        curSeries.push(b);
+      }
+      block.toFront();
+    };
+
+    // listners
+
+    /*var bl = genBlock(400, vSize*8, 4);
+    bl.drag(move, start, up, bl, bl, bl);
+    bl.blockId = 1000;
+    blocks[bl.blockId] = bl;
+    bl = genBlock(200, vSize*8, 4);
+    bl.drag(move, start, up, bl, bl, bl);
+    bl.blockId = 1001;
+    blocks[bl.blockId] = bl;*/
+
+    var newBlock;
+    var isNewBlock = false;
+
+    var dbgMap = [], flg = true;
+
+    $(canvas).bind('touchstart', function(ev){
+      var ev = ev.originalEvent;
+      touches = ev.touches;
+      if(touches.length == 3){
+        if(flg){
+          for(var i=0;i<verticalN;++i){
+            for(var j=0;j<horizontalN;++j){
+              var c = paper.text(j*gridSize+gridSize/2, i*vSize+vSize/2, map[i][j]==undefined?'undef':map[i][j]);
+              c.attr({'font-size': 13 });
+              /*if(map[i][j])c.attr({fill: "#00c"});
+              else c.attr({fill: "#0c0"});*/
+              dbgMap.push(c);
+            }
+          }
+          flg = false;
+        }
+        else  {
+          for(var i=0;i<dbgMap.length;++i){
+            dbgMap[i].remove();
+          }
+            dbgMap = [];
+            flg = true;
+        }
+      }
+      if(touches.length != 2) return;
+      if(isNewBlock){
+        newBlock.remove();
+        return;
+      }
+      isNewBlock = true;
+      var w = limitWidth(snapX(Math.abs(touches[0].pageX-touches[1].pageX)));
+      var widthN = w/gridSize;
+      var posX = calcBlockX(touches[0].pageX, touches[1].pageX, w);
+      var posY = calcBlockY(touches[0].pageY, touches[1].pageY);
+      var posH = posX/gridSize, posV = posY/vSize;
+      var block = genBlock(posX, posY, widthN);
+      newBlock = block;
+      if(!(seriesN[widthN] > 0) || map[posV][posH]){
+        newBlock.attr({fill: '#E40000', opacity: 0.2});
+        if(!(seriesN[widthN] > 0) && !invalid){
+          cancelSound.play();
+          invalid = true;
+        }
+      }
+      drawSeries(newBlock);
+    });
+
+    $(canvas).bind('touchmove', function(ev){
+      var ev = ev.originalEvent;
+      touches = ev.touches;
+      if(touches.length != 2) return;
+      if(!isNewBlock) return;
+      isNewBlock = true;
+      var w = limitWidth(snapX(Math.abs(touches[0].pageX-touches[1].pageX)));
+      var widthN = w/gridSize;
+      var posX = calcBlockX(touches[0].pageX, touches[1].pageX, w);
+      var posY = calcBlockY(touches[0].pageY, touches[1].pageY);
+      var posH = posX/gridSize, posV = posY/vSize;
+      var oldWidthN = newBlock[0].attr('width')/gridSize;
+      newBlock.remove();
+      newBlock = genBlock(posX, posY, widthN);
+      var flag = _.some(_.slice(map[posV], posH, posH+widthN), Number);
+      if(!(seriesN[widthN] > 0) || flag){
+        newBlock.attr({fill: '#E40000', opacity: 0.2});
+        if(!(seriesN[widthN] > 0) && !invalid){
+          cancelSound.play();
+          invalid = true;
+        }
+      }
+      else {
+        for(var i=0; i < Math.abs(oldWidthN-widthN); ++i) clickSound.play();
+      }
+      drawSeries(newBlock);
+    });
+
+    $(canvas).bind('touchend', function(ev){
+      var ev = ev.originalEvent;
+      if(!isNewBlock) return;
+      for(var i=0;i<curSeries.length;++i){
+        curSeries[i].remove();
+      }
+      curSeries = [];
+      doPlace(newBlock);
+      isNewBlock = false;
+      invalid = false;
+    });
+    </script>
+  </body>
+</html>
