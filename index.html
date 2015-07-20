@@ -27,6 +27,19 @@
         margin: 0 auto;
         font-size: 10px;
       }
+      #pointer {
+        visibility: hidden;
+        position: absolute;
+        z-index: 5;
+        width: 30px;
+        height: 30px;
+        margin-top: -15px;
+        margin-left: -15px;
+        border-radius: 50%;
+        background-color: hotpink;
+        opacity: .66;
+        cursor: none;
+      }
     </style>
   </head>
   <body>
@@ -34,6 +47,7 @@
     <div id="canvas"></div>
     <div id="link"><a href="http://www-ui.is.s.u-tokyo.ac.jp/~takeo/course/2015/ui/assignment.htm">http://www-ui.is.s.u-tokyo.ac.jp/~takeo/course/2015/ui/assignment.htm</a></div>
     </main>
+    <div id="pointer"></div>
     <script src="js/lodash.min.js"></script>
     <script src="js/jquery.min.js"></script>
     <script src="js/buzz.min.js"></script>
@@ -306,10 +320,13 @@
 
     var dbgMap = [], flg = true;
 
+    var pointers = [], pointersOn = false;
+
     $(canvas).bind('touchstart', function(ev){
       var ev = ev.originalEvent;
       touches = ev.touches;
-      if(touches.length == 3){
+      if(touches.length == 3)pointersOn ^= true;
+      if(touches.length == 4){
         if(flg){
           for(var i=0;i<verticalN;++i){
             for(var j=0;j<horizontalN;++j){
@@ -356,6 +373,14 @@
     $(canvas).bind('touchmove', function(ev){
       var ev = ev.originalEvent;
       touches = ev.touches;
+      _.forEach(pointers, function(p) { p.remove(); });
+      pointers = [];
+      if(pointersOn){
+        for(var i=0; i<touches.length;++i){
+          var p = paper.ellipse(touches[i].pageX-60, touches[i].pageY-20, 20, 20).attr({'stroke': '', 'fill': 'hotpink', 'opacity': 0.66});
+          pointers.push(p);
+        }
+      }
       if(touches.length != 2) return;
       if(!isNewBlock) return;
       isNewBlock = true;
@@ -379,10 +404,13 @@
         for(var i=0; i < Math.abs(oldWidthN-widthN); ++i) clickSound.play();
       }
       drawSeries(newBlock);
+      _.forEach(pointers, function(p) { p.toFront(); });
     });
 
     $(canvas).bind('touchend', function(ev){
       var ev = ev.originalEvent;
+      _.forEach(pointers, function(p) { p.remove(); });
+      pointers = [];
       if(!isNewBlock) return;
       for(var i=0;i<curSeries.length;++i){
         curSeries[i].remove();
